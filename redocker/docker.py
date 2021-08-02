@@ -42,6 +42,7 @@ class DockerContainer:
         self._restart_policy = config["RestartPolicy"]["Name"]
         self._restart_rety = config["RestartPolicy"]["MaximumRetryCount"]
         self._networkMode = config["NetworkMode"]
+        self._autoremove = config["AutoRemove"]
         self.parse_devices(config["Devices"])
 
 
@@ -60,6 +61,8 @@ class DockerContainer:
         self._workingdir = config["WorkingDir"]
         self._entrypoint = config["Entrypoint"]
         self._tty = config["Tty"]
+        self._cmd = config["Cmd"]
+        self._stdin = config["AttachStdin"]
 
     def parse_network(self, net):
         self._port = net["Ports"]
@@ -70,13 +73,21 @@ class DockerContainer:
             dstr += "--pid %s " % self._pidmode
         if self._privileged is True:
             dstr += "--privileged "
+        if self._stdin is True:
+            dstr += "-i "
         if self._tty is True:
             dstr += "-t "
-        if len(self._sec_opt) > 0:
+        if self._autoremove is True:
+            dstr += "--rm "
+        if self._sec_opt is not None:
             for o in self._sec_opt:
                 dstr += "--security-opt %s " % o
-
+        if self._restart_policy != "no":
+            dstr += "--restart %s" % self._restart_policy
         dstr += self._id
+        if self._cmd is not None:
+            for c in self._cmd:
+                dstr += " %s" % c
         print(dstr)
 
 
