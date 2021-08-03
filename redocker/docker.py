@@ -31,7 +31,8 @@ class DockerContainer:
         self._networks = self._json["NetworkSettings"]
         self.parse_hostconfig(self._json["HostConfig"])
         self.parse_config(self._json["Config"])
-    
+        self.parse_mounts(self._json["Mounts"])
+
     def parse_hostconfig(self, config):
         self._pidmode = config["PidMode"]
         self._privileged = config["Privileged"]
@@ -45,6 +46,29 @@ class DockerContainer:
         self._autoremove = config["AutoRemove"]
         self.parse_devices(config["Devices"])
 
+    def parse_mounts(self, mounts):
+        self._mounts = []
+        for m in mounts:
+            if m["Type"] == "volume":
+                if m["RW"] is True:
+                    self._mounts.append("-v %s:%s" %
+                                    (m["Source"],m["Destination"]))
+                else:
+                    self._mounts.append("-v %s:%s:ro" %
+                                    (m["Source"],m["Destination"]))
+            elif m["Type"] == "bind":
+                if m["RW"] is True:
+                    if m["Propagation"] != "" and m["Propagation"]!= "rprivate":
+                        self._mounts.append("-v %s:%s,%s" %
+                                            (m["Source"],m["Destination"],m["Propagation"]))
+                    else:
+                        self._mounts.append("-v %s:%s" %
+                                            (m["Source"],m["Destination"]))
+                else:
+                    self._mounts.append("-v %s:%s:ro" %
+                                    (m["Source"],m["Destination"]))
+            elif m["Type"] == "tmpfs":
+                self._mounts.append("--tmpfs %s" % m["Destination"])
 
     def parse_devices(self, devices):
         self._devices = []
@@ -54,9 +78,9 @@ class DockerContainer:
                 container = d['PathInContainer']
                 perms = d['CgroupPermissions']
                 self._devices.append('%s:%s:%s' % (host, container, perms))
-            
-        
+
     def parse_config(self, config):
+        self._hostname = config["Hostname"]
         self._labels = config["Labels"]
         self._workingdir = config["WorkingDir"]
         self._entrypoint = config["Entrypoint"]
@@ -82,8 +106,12 @@ class DockerContainer:
         if self._sec_opt is not None:
             for o in self._sec_opt:
                 dstr += "--security-opt %s " % o
+        if self._hostname != self._id:
+            dstr += "--hostname %s " % self._hostname
         if self._restart_policy != "no":
-            dstr += "--restart %s" % self._restart_policy
+            dstr += "--restart %s " % self._restart_policy
+        for i in self._mounts:
+            dstr += "%s " % i
         dstr += self._id
         if self._cmd is not None:
             for c in self._cmd:
