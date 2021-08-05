@@ -1,4 +1,3 @@
-import os
 import subprocess
 import json
 
@@ -8,18 +7,65 @@ def check_output(args, stderr=None):
     return subprocess.Popen(args, stdout=subprocess.PIPE,
                             stderr=stderr).communicate()[0]
 
-def Check_image_or_container(cid, like) -> int:
+def Check_id(cid, like) -> str:
     containers = check_output(["docker", "ps", "-q"]).decode().splitlines()
     images = check_output(["docker", "images", "-q"]).decode().splitlines()
+    nets = check_output(["docker", "network", "ls", "-q"]).decode().splitlines()
     if cid in containers:
-        return 0
+        return "container"
     if cid in images:
-        return 1
-    return -1
+        return "image"
+    if cid in nets:
+        return "network"
+    return "unknow"
 
+class DockerNetwork:
+    """
+    docker network
+    """
+    def __init__(self, nid) -> None:
+        self._id = nid
+
+    def do_inspect(self):
+        result = check_output(["docker", "inspect", self._id]).decode()
+        self._json = json.loads(result)[0]
+        self._name = self._json["Name"]
+        self._driver = self._json["Driver"]
+        self._ipv6 = self._json["EnableIPv6"]
+        self._containers = self._json["Containers"]
+        self._labels = self._json["Labels"]
+        self._internal = self._json["Internal"]
+        self._attachable = self._json["Attachable"]
+        self._config_only = self._json["ConfigOnly"]
+        self._ingress = self._json["Ingress"]
+        self.parse_ipam(self._json["IPAM"])
+
+    def parse_ipam(self, ipam):
+        cfg = ipam["Config"]
+        self.subnet = []
+        if cfg is not None:
+            for i in cfg:
+                self.subnet.append(i["Subnet"])
+                
+    def dump(self):
+        dstr = "docker network create "
+        if self._attachable is True:
+            dstr += "--attachable "
+        if self._config_only is True:
+            dstr += "--config-only "
+        if self._ingress is True:
+            dstr += "--ingress "
+        if self._internal is True:
+            dstr += "--internal "
+        if self._ipv6 is True:
+            dstr += "--ipv6"
+        dstr += "-d %s " % self._driver
+        dstr += self._name
+        print(dstr)
 
 class DockerContainer:
     """
+    docker container
     """
     def __init__(self, cid) -> None:
         self._id = cid
@@ -28,7 +74,9 @@ class DockerContainer:
         result = check_output(["docker", "inspect", self._id]).decode()
         self._json = json.loads(result)[0]
         self._image = self._json["Image"].split(':')[1]
-        self._networks = self._json["NetworkSettings"]
+        # ignore name on dump
+        self._name = self._json["Name"]
+        self.parse_network(self._json["NetworkSettings"])
         self.parse_hostconfig(self._json["HostConfig"])
         self.parse_config(self._json["Config"])
         self.parse_mounts(self._json["Mounts"])
@@ -38,12 +86,20 @@ class DockerContainer:
         self._privileged = config["Privileged"]
         self._sec_opt = config["SecurityOpt"]
         self._utsmode = config["UTSMode"]
+        self._userns = config["UsernsMode"]
+        self._publishall = config["PublishAllPorts"]
         self._memory = config["Memory"]
-        self._pidsLimit = config["PidsLimit"]
+        self._pids_limit = config["PidsLimit"]
+        self._ulimits = config["Ulimits"]
         self._restart_policy = config["RestartPolicy"]["Name"]
         self._restart_rety = config["RestartPolicy"]["MaximumRetryCount"]
         self._networkMode = config["NetworkMode"]
         self._autoremove = config["AutoRemove"]
+        self._portbinding = []
+        pb = config["PortBindings"]
+        if pb is not None:
+            for p in pb:
+                self._portbinding.append(p)
         self.parse_devices(config["Devices"])
 
     def parse_mounts(self, mounts):
@@ -81,38 +137,78 @@ class DockerContainer:
 
     def parse_config(self, config):
         self._hostname = config["Hostname"]
+        self._domainname = config["Domainname"]
+        self._user = config["User"]
         self._labels = config["Labels"]
         self._workingdir = config["WorkingDir"]
         self._entrypoint = config["Entrypoint"]
         self._tty = config["Tty"]
         self._cmd = config["Cmd"]
-        self._stdin = config["AttachStdin"]
+        self._stdin = config["OpenStdin"]
+        self._attach = config["AttachStdin"]
+        self._expose_ports = []
+        if len(self._ports) > len(self._portbinding):
+            ep = config["ExposedPorts"]
+            if ep is not None:
+                for p in ep:
+                    if p not in self._portbinding:
+                        self._expose_ports.append(p)
+        self._env = []
+        for e in  config["Env"]:
+            if e.startswith('DEBIAN_FRONTEND') or \
+                e.startswith('TZ=') or \
+                e == "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin":                    
+                continue
+            self._env.append(e)
 
     def parse_network(self, net):
-        self._port = net["Ports"]
+        self._ports = []
+        for p in net["Ports"]:
+            self._ports.append(p)
+        self._networks = []
+        for k in net["Networks"]:
+            self._networks.append(k)
 
     def dump(self):
         dstr = "docker run "
         if self._pidmode != "":
             dstr += "--pid %s " % self._pidmode
+        if self._pids_limit is not None:
+            dstr += "--pid-limits %d "% self._pids_limit
         if self._privileged is True:
             dstr += "--privileged "
         if self._stdin is True:
             dstr += "-i "
         if self._tty is True:
             dstr += "-t "
+        if self._attach is False:
+            dstr += "-d "
         if self._autoremove is True:
             dstr += "--rm "
+        if self._publishall is True:
+            dstr += "-P "
+        for p in self._portbinding:
+            dstr += "-p %s " % p
+        for p in self._expose_ports:
+            dstr += "--expose %s " % p
+        if self._workingdir != "":
+            dstr += "-w %s " % self._workingdir
+        if self._user != "":
+            dstr += "-u %s " % self._user
         if self._sec_opt is not None:
             for o in self._sec_opt:
                 dstr += "--security-opt %s " % o
+        for e in self._env:
+            dstr += "-e %s " % e
         if self._hostname != self._id:
             dstr += "--hostname %s " % self._hostname
+        for i in self._networks:
+            dstr += "--net %s "% i
         if self._restart_policy != "no":
             dstr += "--restart %s " % self._restart_policy
         for i in self._mounts:
             dstr += "%s " % i
-        dstr += self._id
+        dstr += self._image[:12]
         if self._cmd is not None:
             for c in self._cmd:
                 dstr += " %s" % c
