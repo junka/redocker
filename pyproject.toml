@@ -1,7 +1,7 @@
 [tool.poetry]
 name = "redocker"
-version = "0.1.0"
-description = "reverse a docker image to Dockerfile"
+version = "0.1.1"
+description = "reverse docker image, container and network"
 authors = ["junka"]
 license = "BSD"
 
@@ -9,6 +9,9 @@ license = "BSD"
 python = "^3.5"
 
 [tool.poetry.dev-dependencies]
+
+[tool.poetry.scripts]
+redocker = 'redocker.redocker:main'
 
 [build-system]
 requires = ["poetry-core>=1.0.0"]
