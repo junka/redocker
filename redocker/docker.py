@@ -73,7 +73,9 @@ class DockerContainer:
     def do_inspect(self):
         result = check_output(["docker", "inspect", self._id]).decode()
         self._json = json.loads(result)[0]
-        self._image = self._json["Image"].split(':')[1]
+        img = DockerImage(self._json["Image"].split(':')[1])
+        img.do_inspect()
+        self._image = img.get_tags()
         # ignore name on dump
         self._name = self._json["Name"]
         self.parse_network(self._json["NetworkSettings"])
@@ -208,7 +210,7 @@ class DockerContainer:
             dstr += "--restart %s " % self._restart_policy
         for i in self._mounts:
             dstr += "%s " % i
-        dstr += self._image[:12]
+        dstr += self._image[0]
         if self._cmd is not None:
             for c in self._cmd:
                 dstr += " %s" % c
