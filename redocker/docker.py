@@ -78,6 +78,7 @@ class DockerContainer:
         self._image = img.get_tags()
         # ignore name on dump
         self._name = self._json["Name"]
+        self._name = self._name[self._name.startswith('/') and len('/'):]
         self.parse_network(self._json["NetworkSettings"])
         self.parse_hostconfig(self._json["HostConfig"])
         self.parse_config(self._json["Config"])
@@ -97,6 +98,8 @@ class DockerContainer:
         self._restart_rety = config["RestartPolicy"]["MaximumRetryCount"]
         self._networkMode = config["NetworkMode"]
         self._autoremove = config["AutoRemove"]
+        self._cpuset_cpus = config["CpusetCpus"]
+        self._cpuset_mems = config["CpusetMems"]
         self._portbinding = []
         pb = config["PortBindings"]
         if pb is not None:
@@ -202,8 +205,14 @@ class DockerContainer:
                 dstr += "--security-opt %s " % o
         for e in self._env:
             dstr += "-e %s " % e
+        if self._name is not None:
+            dstr += "--name %s " % self._name
         if self._hostname != self._id:
             dstr += "--hostname %s " % self._hostname
+        if self._cpuset_cpus is not None:
+            dstr += "--cpuset-cpus %s " % self._cpuset_cpus
+        if self._cpuset_mems is not None:
+            dstr += "--cpuset-mems %s " % self._cpuset_mems
         for i in self._networks:
             dstr += "--net %s "% i
         if self._restart_policy != "no":
